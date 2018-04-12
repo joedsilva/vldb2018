@@ -19,28 +19,14 @@ def datasetLoader(spark: SparkSession, name: String) : Dataset[Row] = {
     .option("driver", "nl.cwi.monetdb.jdbc.MonetDriver")
     .load()
 }
-
-val tripdata2017 = datasetLoader(spark, "sys.tripdata2017")
-val stations2017 = datasetLoader(spark, "sys.stations2017")
 ```
+
+Use a SQL to read the minimal data required for training from the database.
 
 We will not be concerned with trips that started and ended at the same station as those are noise. Also, to weed out any further fluctuations in the input data set, we will limit ourselves to only those station combinations which has at the least 50 trips.
 
 ```scala
-val freqStations = tripdata2017.filter(col("stscode") =!= col("endscode"))
-  .groupBy("stscode", "endscode").agg(count("id").alias("numtrips"))
-  .filter(col("numtrips") >= 50)
-```
-
-Next we will enrich the trip data set by using the distance information provided by the Google maps' API.
-
-Google also provides its estimated duration for the trip. We will have to see in the end if our trained model is able to predict the trip duration better than google's estimate. So we will also save Google's estimate for the trip duration for that comparison.
-
-```scala
-val gmdata2017 = datasetLoader("sys.gmdata2017")
-val gtripData = gmdata2017.join(tripdata2017, usingColumns=Seq("stscode", "endscode"))
-  .join(freqStations, usingColumns=Seq("stscode", "endscode"))
-  .select("id", "duration", "gdistm", "gduration")
+val gtripData = datasetLoader(spark, "(select t.duration, g.gdistm, g.gduration from (   select stscode, endscode   from bixi.tripdata2017   where stscode<>endscode   group by stscode, endscode   having count(*) >= 50 )s, tripdata2017 t, gmdata2017 g where t.stscode = s.stscode   and t.endscode = s.endscode   and t.stscode = g.stscode   and t.endscode = g.endscode) as g")
   .withColumn("gdistm", col("gdistm").cast("double"))
 ```
 
