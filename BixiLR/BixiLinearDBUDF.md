@@ -1,5 +1,10 @@
 This is the database UDF (stored procedure) version of the linear regression workflow on the Bixi dataset.
 
+The user uses both the regular database client to execute SQL statements as well as writes and executes databse UDFs when Python is required to perform linear alegbraic computations. As a result the workflow is an interleaved mix of SQLs and database UDFs.
+
+This often results in the user having to redo some of the computation and transformation already performed in a previous invocation of the UDF as NumPy objects do not survive outside the UDF's life span.
+
+The restrictive nature of UDF also results in having to duplicate some of the source code between different UDFs, such as those required to compute the cost function (squared error) and perform gradient descent.
 
 Let us see what tables we have in the database
 ```
@@ -155,7 +160,8 @@ Next stop, we need to include the longitude and latitude information of the star
 
 ```SQL
 CREATE LOCAL TEMPORARY TABLE freqstationscord AS
-  SELECT fs.*, sst.slatitude AS stlat, sst.slongitude AS stlong, est.slatitude AS enlat, est.slongitude AS enlong
+  SELECT fs.*, sst.slatitude AS stlat, sst.slongitude AS stlong
+        ,est.slatitude AS enlat, est.slongitude AS enlong
   FROM freqstations fs, stations2017 sst, stations2017 est
   WHERE fs.stscode = sst.scode AND fs.endscode = est.scode
 ON COMMIT PRESERVE ROWS
@@ -183,16 +189,19 @@ It would be easier if we can translate the coordinates to a distance metric.
  Python's geopy module supports this computation using Vincenty's formula.
  This provides us with a distance as crow flies between two coordiantes.
  This might be a reasonable approximation of actual distance travelled in a trip.
- We can use a UDF to accomplish this.
+ We can use a _scalar UDF_ to accomplish this.
 
 ```Python
-CREATE FUNCTION computevdist(stlat FLOAT, stlong FLOAT, enlat FLOAT, enlong FLOAT) RETURNS INTEGER
+CREATE FUNCTION computevdist(stlat FLOAT, stlong FLOAT, enlat FLOAT, enlong FLOAT) 
+RETURNS INTEGER
 LANGUAGE PYTHON
 {
     import numpy as np;
     import geopy.distance;  # We will use this module to compute distance.
     vdistm = np.empty(len(stlat), dtype=int);  # add a new empty column to hold distance.
-    for i in range(0, len(stlat)):  # populate the distance metric using longitude/latitude of coordinates.
+    
+    # populate the distance metric using longitude/latitude of coordinates.
+    for i in range(0, len(stlat)):
         vdistm[i] = int(geopy.distance.distance((stlat[i], stlong[i]), (enlat[i], enlong[i])).meters);
     return vdistm;
 };
@@ -373,9 +382,19 @@ RETURNS TABLE(sqerr1 FLOAT, sqerr2 FLOAT) LANGUAGE PYTHON
   # Our linear regression equation is of the form.
   # dur = a + b*dist
   # We will normalize and extract the training data set to train this model.
-  # For this purpose we will hardcode the max duration and max distance values we observed in the earlier output.
-  # We are also keeping apart 1/3rd of the distance metrics for testing. Rest we will use to build the training data.
-  trainDataSet_ = _conn.execute('SELECT 1 AS bias, CAST(1.0 AS FLOAT) * vdistm/{} AS vdistm , CAST(1.0 AS FLOAT) * duration/{} AS duration FROM ( SELECT vdistm, duration FROM tripdata WHERE vdistm IN ( SELECT vdistm FROM uniquetripdist WHERE NOT (rowidx%3 = 1) ) )x ;'.format(9074, 7199))
+  # For this purpose we will hardcode the max duration and max distance
+  #   values we observed in the earlier output.
+  # We are also keeping apart 1/3rd of the distance metrics for testing.
+  # Rest we will use to build the training data.
+  maxduration = 7199; maxdist = 9074;
+  trainDataSet_ = _conn.execute(' SELECT 1 AS bias, CAST(1.0 AS FLOAT) * vdistm/{} AS vdistm ' \
+                                      ',CAST(1.0 AS FLOAT) * duration/{} AS duration ' \
+                                ' FROM ( SELECT vdistm, duration ' \
+                                       ' FROM tripdata ' \
+                                       ' WHERE vdistm IN ( SELECT vdistm ' \
+                                                         ' FROM uniquetripdist ' \
+                                                         ' WHERE NOT (rowidx%3 = 1) ) ' \
+                                       ')x ;'.format(maxdist, maxduration));
 
   trainDataSet  = np.stack( (trainDataSet_['bias'], trainDataSet_['vdistm']) );
   trainDataSetDuration = trainDataSet_['duration'];
@@ -391,11 +410,13 @@ RETURNS TABLE(sqerr1 FLOAT, sqerr2 FLOAT) LANGUAGE PYTHON
   # Let us see what is the error for the first iteration.
   sqerr = squaredErr(trainDataSetDuration, pred);
 
-  # We need to perform a gradient descent based on the squared errors. We will write another function to perform this.
+  # We need to perform a gradient descent based on the squared errors.
+  # We will write another function to perform this.
   def gradDesc(actual, predicted, indata):
     return indata @ ((predicted - actual).T) / actual.shape[0];
 
-  # Let us update our params using gradient descent using the error we got. We also need to use a learning rate, alpha (arbitrarily chosen).
+  # Let us update our params using gradient descent using the error we got.
+  # We also need to use a learning rate, alpha (arbitrarily chosen).
   alpha = 0.1;
   params = params - alpha * gradDesc(trainDataSetDuration, pred, trainDataSet);
 
@@ -406,6 +427,8 @@ RETURNS TABLE(sqerr1 FLOAT, sqerr2 FLOAT) LANGUAGE PYTHON
   return {'sqerr1':sqerr, 'sqerr2':sqerr2 };
 };
 ```
+
+We will execute this UDF to see if this approach has any promise.
 
 ```SQL
 SELECT * FROM BixiLinear();
@@ -421,7 +444,7 @@ SELECT * FROM BixiLinear();
 ```
 
 So the error rates are decreasing, so it might be a possible solution.
-But before we proceed, may be we should check if google maps API's distance metric gives a better learning rate. Let us see what fields we can use from Google.
+But before we proceed, may be we should check if Google maps API's distance metric gives a better learning rate. Let us see what fields we can use from Google.
 
 ```SQL
 SELECT * FROM gmdata2017 LIMIT 5;
@@ -581,9 +604,19 @@ RETURNS TABLE(sqerr1 FLOAT, sqerr2 FLOAT) LANGUAGE PYTHON
   import numpy as np;
 
   # We will normalize and extract the training data set to train this model.
-  # For this purpose we will hardcode the max duration and max distance values we observed in the earlier output.
-  # We are also keeping apart 1/3rd of the distance metrics for testing. Rest we will use to build the training data.
-  gtrainDataSet_ = _conn.execute('SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm , CAST(1.0 AS FLOAT) * duration/{} AS duration FROM ( SELECT gdistm, duration FROM gtripdata WHERE gdistm IN ( SELECT gdistm FROM guniquetripdist WHERE NOT (rowidx%3 = 1) ) )x ;'.format(14530, 7199))
+  # For this purpose we will hardcode the max duration and max distance values
+  #   that we observed in the earlier output.
+  # We are also keeping apart 1/3rd of the distance metrics for testing.
+  # Rest we will use to build the training data.
+  gmaxduration = 7199; gmaxdist = 14530;
+  gtrainDataSet_ = _conn.execute(' SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm ' \
+                                       ' ,CAST(1.0 AS FLOAT) * duration/{} AS duration ' \
+                                 ' FROM ( SELECT gdistm, duration ' \ 
+                                        ' FROM gtripdata ' \
+                                        ' WHERE gdistm IN ( SELECT gdistm ' \
+                                                          ' FROM guniquetripdist ' \
+                                                          ' WHERE NOT (rowidx%3 = 1) ) ' \
+                                        ')x ;'.format(gmaxdist, gmaxduration));
 
   gtrainDataSet  = np.stack( (gtrainDataSet_['bias'], gtrainDataSet_['gdistm']) );
   gtrainDataSetDuration = gtrainDataSet_['duration'];
@@ -614,6 +647,8 @@ RETURNS TABLE(sqerr1 FLOAT, sqerr2 FLOAT) LANGUAGE PYTHON
   return {'sqerr1':gsqerr, 'sqerr2':gsqerr2 };
 };
 ```
+
+Let us execute this UDF and see how it looks.
 
 ```SQL
 SELECT * FROM BixiLinearG();
@@ -649,19 +684,24 @@ RETURNS TABLE
 (
   sqerr1 FLOAT
 , sqerr2 FLOAT
-, timelog STRING
 ) LANGUAGE PYTHON
 {
   import numpy as np;
 
-  import time;
-  fe_startt = time.time();
-
   # We will normalize and extract the training data set to train this model.
-  # For this purpose we will hardcode the max duration and max distance values we observed in the earlier output.
+  # For this purpose we will hardcode the max duration and max distance values
+  #    that we observed in the earlier output.
   gmaxduration = 7199; gmaxdist = 14530;
-  # We are also keeping apart 1/3rd of the distance metrics for testing. Rest we will use to build the training data.
-  gtrainDataSet_ = _conn.execute('SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm , CAST(1.0 AS FLOAT) * duration/{} AS duration FROM ( SELECT gdistm, duration FROM gtripdata WHERE gdistm IN ( SELECT gdistm FROM guniquetripdist WHERE NOT (rowidx%3 = 1) ) )x ;'.format(gmaxdist, gmaxduration))
+  # We are also keeping apart 1/3rd of the distance metrics for testing.
+  # Rest we will use to build the training data.
+  gtrainDataSet_ = _conn.execute(' SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm ' \ 
+                                       ',CAST(1.0 AS FLOAT) * duration/{} AS duration ' \
+                                 ' FROM ( SELECT gdistm, duration ' \ 
+                                        ' FROM gtripdata ' \
+                                        ' WHERE gdistm IN ( SELECT gdistm ' \
+                                                          ' FROM guniquetripdist ' \
+                                                          ' WHERE NOT (rowidx%3 = 1) ) ' \
+                                        ')x ;'.format(gmaxdist, gmaxduration));
 
   gtrainDataSet  = np.stack( (gtrainDataSet_['bias'], gtrainDataSet_['gdistm']) );
   gtrainDataSetDuration = gtrainDataSet_['duration'];
@@ -676,31 +716,33 @@ RETURNS TABLE
     return indata @ ((predicted - actual).T) / actual.shape[0];
 
   alpha = 0.1;
-  mtr_startt = time.time();
-
   for i in range(0, 1000):
     gpred = gparams.T @ gtrainDataSet;
     gparams = gparams - alpha * gradDesc(gtrainDataSetDuration, gpred, gtrainDataSet);
 
   gsqerr = squaredErr(gtrainDataSetDuration, gpred);
 
-  mte_startt = time.time();
   # Let us see how our model performs in predictions against the test data set we had kept apart.
-  gtestDataSet_ =  _conn.execute('SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm , CAST(1.0 AS FLOAT) * duration/{} AS duration , gduration FROM ( SELECT gdistm, duration, gduration FROM gtripData WHERE gdistm IN ( SELECT gdistm FROM guniqueTripDist WHERE (rowidx%3 = 1) ) )x ;'.format(gmaxdist, gmaxduration));
+  gtestDataSet_ =  _conn.execute(' SELECT 1 AS bias, CAST(1.0 AS FLOAT) * gdistm/{} AS gdistm ' \
+                                       ',CAST(1.0 AS FLOAT) * duration/{} AS duration , gduration ' \ 
+                                 ' FROM ( SELECT gdistm, duration, gduration ' \ 
+                                        ' FROM gtripData ' \ 
+                                        ' WHERE gdistm IN ( SELECT gdistm ' \
+                                                          ' FROM guniqueTripDist ' \
+                                                          ' WHERE (rowidx%3 = 1) ) ' \
+                                       ')x ;'.format(gmaxdist, gmaxduration));
+                                       
   gtestDataSet  = np.stack( (gtestDataSet_['bias'], gtestDataSet_['gdistm']) );
   gtestDataSetDuration = gtestDataSet_['duration'];
 
   gtestpred = gparams.T @ gtestDataSet;
   gtestsqerr1 = squaredErr(gtestDataSetDuration * gmaxduration, gtestpred * gmaxduration);
 
-  # We would also like to check how the duration provided by Google maps API hold up to the test data set.
+  # We would also like to check how the duration provided 
+  #   by Google maps API hold up to the test data set.
   gtestsqerr2 = squaredErr(gtestDataSetDuration * gmaxduration, gtestDataSet_['gduration']);
 
-  end_t = time.time();
-  timelogs = 'FEATURE_ENG={},MODEL_TRAINING={},MODEL_TESTING={}'.format(mtr_startt-fe_startt, mte_startt-mtr_startt, end_t-mte_startt);
-
-
-  return {'sqerr1':gtestsqerr1, 'sqerr2':gtestsqerr2, 'timelog':timelogs };
+  return {'sqerr1':gtestsqerr1, 'sqerr2':gtestsqerr2};
 };
 ```
 
