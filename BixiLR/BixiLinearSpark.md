@@ -16,7 +16,7 @@ Further we can also use the describe() function to look at the data distribution
 ```scala
 def datasetLoader(spark: SparkSession, name: String) : Dataset[Row] = {
   return spark.read.format("jdbc").option("dbtable", name)
-    .option("url", "jdbc:monetdb://localhost:50000/bixi")
+    .option("url", "jdbc:monetdb://cerberus:50000/bixi")
     .option("driver", "nl.cwi.monetdb.jdbc.MonetDriver")
     .load()
 }
