@@ -3,7 +3,7 @@ This is the database UDF (stored procedure) version of the linear regression wor
 This is a "basic" workflow where the user (an _oracle_) directly builds the training dataset with minimal to no exploration,
 an unrealistic, but best case scenario.
 
-Since the entire workflow logic is written as one whole function, the user has no way interact with any of the intermediate objects or produce any intermittent outputs.
+Since the entire workflow logic is written as one whole function, the user has no way interact with any of the intermediate objects or produce any intermediate outputs.
 
 Any computational errors / inadequacies will come into light only after the entire workflow is executed. At which point the user will have to edit the function and re-run it completely, as no intermediate NumPy objects survive outside of the UDF scope.
 
