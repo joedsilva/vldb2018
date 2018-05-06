@@ -38,3 +38,14 @@ The workflows for AIDA and pandas are as Jupyter notebooks, a common method of i
 
   - [BixiLinearSpark.md](BixiLR/BixiLinearSpark.md) : Workflow for Spark, written in Scala.
 
+
+## Performance and Usability Characteristics.
+![Performance Comparisons](images/bixiLR.png)
+
+
+|	| Language Expertise |	Interactive System |	Incremental Exploration Possible |	"Near-data" Computation |
+|---|---|---|---|---|
+| __AIDA__ |	Python |	Yes |	Yes |	Yes |
+| __Database UDF__ |	Python, SQL |	No	| No |	Yes |
+| __pandas__	| Python	| Yes	| Yes |	No |
+| __Spark__ |	Scala	| Yes	| Yes |	No |
