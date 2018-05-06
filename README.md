@@ -40,7 +40,10 @@ The workflows for AIDA and pandas are as Jupyter notebooks, a common method of i
 
 
 ## Performance and Usability Characteristics.
-![Performance Comparisons](images/bixiLR.png)
+<kbd>
+<img src=images/bixiLR.png>
+</kbd>
+<br><br>
 
 
 |	| Language Expertise |	Interactive System |	Incremental Exploration Possible |	"Near-data" Computation |
