@@ -16,7 +16,7 @@ The workflows for AIDA and pandas are as Jupyter notebooks, a common method of i
   
   - [BixiLinearPandas-Basic.ipynb](BixiLR/BixiLinearPandas-Basic.ipynb) : Similar workflow logic, written using pandas. The data required to perform the workflow is fetched from the database by executing the SQL that contains any necessary joins within the database (pushdown concept). The database connection used is not manually tuned for large data sets, and therefore it experiences a larger data transfer time between the database and the client.
 
-  - [BixiLinearPandasOpt-Basic.ipynb](BixiLR/BixiLinearPandas-Basic.ipynb) : An optimized version of the above pandas workflow. In this case the database connection is explicitly optimized for large data transfer buffers to reduce the time it takes to load data.
+  - [BixiLinearPandasOpt-Basic.ipynb](BixiLR/BixiLinearPandasOpt-Basic.ipynb) : An optimized version of the above pandas workflow. In this case the database connection is explicitly optimized for large data transfer buffers to reduce the time it takes to load data.
   
   - [BixiLinearDBUDF-Basic.md](BixiLR/BixiLinearDBUDF-Basic.md) : The entire workflow logic as a whole is written into a database UDF. In this approach, the user has no way interact with any of the intermediate objects or produce any intermediate outputs.
   
@@ -31,7 +31,7 @@ The workflows for AIDA and pandas are as Jupyter notebooks, a common method of i
   
   - [BixiLinearPandas.ipynb](BixiLR/BixiLinearPandas.ipynb) : Same workflow logic, written using pandas. However, since the data scientist needs to "peek" and "analyze" each data sets and transformations, the individual tables get loaded into pandas, which also results in relational joins being performed in pandas, as the data sets are already on the client side. The database connection used is not manually tuned for large data sets, and therefore it experiences a larger data transfer time between the database and the client.
 
-  - [BixiLinearPandasOpt.ipynb](BixiLR/BixiLinearPandas.ipynb) : Same workflow logic, written using pandas. In this case the database connection is explicitly optimized for large data transfer buffers to reduce the time it takes to load data.
+  - [BixiLinearPandasOpt.ipynb](BixiLR/BixiLinearPandasOpt.ipynb) : Same workflow logic, written using pandas. In this case the database connection is explicitly optimized for large data transfer buffers to reduce the time it takes to load data.
 
   - [BixiLinearDBUDF.md](BixiLR/BixiLinearDBUDF.md) : The workflow is written as a mixture of SQLs executed using a regular database client and a set of database UDFs that the user writes when there is a need to perform linear algebra. There is some small duplication of processing and source code statements due to the restrictive nature of database UDFs that does not allow host language objects (such as NumPy array) or function definitions to be used across different UDF invocations.
 
